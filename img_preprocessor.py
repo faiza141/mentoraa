@@ -1,49 +1,63 @@
 import cv2
 import numpy as np
 import pytesseract
-from PIL import Image 
+from PIL import Image
 from config import TESSERACT_PATH
 
 if TESSERACT_PATH:
     pytesseract.pytesseract.tesseract_cmd = TESSERACT_PATH
 
-# constants
-_SCALE         = 2.0
-_SHARPEN_KERNEL = np.array([[0, -1, 0],
-                             [-1, 5, -1],
-                             [0, -1, 0]])
 
-# grayscaling
-def _to_gray(pil_image: Image.Image) -> np.ndarray:
-    bgr  = cv2.cvtColor(np.array(pil_image), cv2.COLOR_RGB2BGR)
-    return cv2.cvtColor(bgr, cv2.COLOR_BGR2GRAY)
-
-# deskew the image
-def _deskew(gray: np.ndarray) -> np.ndarray:
-    coords = np.column_stack(np.where(gray > 0))
-    if len(coords) == 0:
-        return gray
- 
-    angle = cv2.minAreaRect(coords)[-1]
-    angle = -(90 + angle) if angle < -45 else -angle
- 
-    h, w   = gray.shape[:2]
-    matrix = cv2.getRotationMatrix2D((w // 2, h // 2), angle, 1.0)
-    return cv2.warpAffine(gray, matrix, (w, h),  flags=cv2.INTER_CUBIC,  borderMode=cv2.BORDER_REPLICATE)
-
-# preprocessing
-def preprocess(pil_image: Image.Image) -> np.ndarray:
-
-    gray = _to_gray(pil_image)
-    gray = cv2.resize(gray, None, fx=_SCALE, fy=_SCALE,  interpolation=cv2.INTER_CUBIC)
-    gray = cv2.filter2D(gray, -1, _SHARPEN_KERNEL)
-    gray = cv2.fastNlMeansDenoising(gray, h=20)
-    gray = _deskew(gray)
-
-    return cv2.adaptiveThreshold(gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, blockSize=31, C=15)
+def is_hindi(text: str) -> bool:
+    devanagari = sum(1 for c in text if '\u0900' <= c <= '\u097F')
+    latin      = sum(1 for c in text if c.isalpha() and c.isascii())
+    return devanagari > latin * 0.4
 
 
-# text extraction - OCR
-def extract_text(processed_image):
-    text = pytesseract.image_to_string(processed_image, lang="eng+hin", config= r"--psm 6 --oem 3")
-    return text.strip()
+def preprocess(pil_image, hindi: bool = False):
+    cv_image = cv2.cvtColor(np.array(pil_image), cv2.COLOR_RGB2BGR)
+    gray     = cv2.cvtColor(cv_image, cv2.COLOR_BGR2GRAY)
+
+    h, w  = gray.shape
+    scale = 2.5 if hindi else 2.0
+    if w < 1800:
+        gray = cv2.resize(gray, None, fx=scale, fy=scale,
+                          interpolation=cv2.INTER_CUBIC)
+
+    denoised = cv2.fastNlMeansDenoising(gray, h=8 if hindi else 10)
+
+    thresh = cv2.adaptiveThreshold(
+        denoised, 255,
+        cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+        cv2.THRESH_BINARY,
+        blockSize=15 if hindi else 25,
+        C=8 if hindi else 10,
+    )
+    return thresh
+
+
+def extract_text(processed_image, hindi: bool = False) -> str:
+    lang   = "eng+hin" if hindi else "eng"
+    config = r"--psm 6 --oem 3"
+    return pytesseract.image_to_string(
+        processed_image, lang=lang, config=config
+    ).strip()
+
+
+# FIX: detect language by running a FAST hindi OCR pass on a small
+# crop of the image — much more reliable than checking garbled English output
+def detect_language(pil_image) -> bool:
+    """Returns True if image is predominantly Hindi/Devanagari."""
+    # Crop center strip of the image (most content, skip header/footer)
+    w, h   = pil_image.size
+    crop   = pil_image.crop((0, int(h * 0.2), w, int(h * 0.6)))
+
+    # Small quick preprocess
+    cv_img   = cv2.cvtColor(np.array(crop), cv2.COLOR_RGB2BGR)
+    gray     = cv2.cvtColor(cv_img, cv2.COLOR_BGR2GRAY)
+    gray     = cv2.resize(gray, None, fx=1.5, fy=1.5, interpolation=cv2.INTER_CUBIC)
+    _, thresh = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+
+    # Quick OCR with Hindi
+    quick = pytesseract.image_to_string(thresh, lang="eng+hin", config="--psm 6 --oem 3")
+    return is_hindi(quick)

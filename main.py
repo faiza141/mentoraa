@@ -1,16 +1,16 @@
 import os
-import numpy as np
 from PIL import Image
 
 from config import INPUT_DIR, OUTPUT_DIR, supported_formats
-from img_preprocessor import preprocess, extract_text
+from img_preprocessor import preprocess, extract_text, detect_language
 from clean_text import clean_text
 from file_handling import load_file, crop_header
 from extract import detect_and_extract_tables
+from translate import translate_to_english
 
-# File processing 
+
 def process_file(filepath):
-    filename = os.path.basename(filepath)
+    filename         = os.path.basename(filepath)
     name_without_ext = os.path.splitext(filename)[0]
     print(f"\nProcessing: {filename}")
 
@@ -28,9 +28,17 @@ def process_file(filepath):
 
         tables = detect_and_extract_tables(pil_image)
 
-        processed = preprocess(pil_image)
-        text = extract_text(processed)
-        text = clean_text(text)
+        # Detect language once using smart crop (reliable on Hindi docs)
+        hindi = detect_language(pil_image)
+        print(f"     Language: {'Hindi' if hindi else 'English'}")
+
+        processed = preprocess(pil_image, hindi=hindi)
+        raw_text  = extract_text(processed, hindi=hindi)
+        text      = clean_text(raw_text)
+
+        if hindi:
+            print(f"     Translating to English...")
+            text = translate_to_english(text)
 
         page_content = text
         if tables:
@@ -39,19 +47,19 @@ def process_file(filepath):
 
         all_text.append(f"--- Page {i + 1} ---\n{page_content}")
 
-    final_text = "\n\n".join(all_text)
+    final_text  = "\n\n".join(all_text)
     output_path = os.path.join(OUTPUT_DIR, f"{name_without_ext}.txt")
     with open(output_path, "w", encoding="utf-8") as f:
         f.write(final_text)
     print(f"  ✓ Saved: {output_path}")
 
-# main execution
+
 if __name__ == "__main__":
     os.makedirs(OUTPUT_DIR, exist_ok=True)
 
     all_files = [
         os.path.join(INPUT_DIR, f)
-        for f in os.listdir(INPUT_DIR)
+        for f in sorted(os.listdir(INPUT_DIR))
         if os.path.splitext(f)[1].lower() in supported_formats
     ]
 

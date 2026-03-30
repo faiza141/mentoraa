@@ -1,18 +1,14 @@
 import os
 from PIL import Image
 from pdf2image import convert_from_path
-from config import POPPLER_PATH, supported_formats
+from config import poppler_path, supported_formats
 
 # load files
 def load_file(filepath):
     ext = os.path.splitext(filepath)[1].lower()
 
-    if ext not in supported_formats:
-        print(f"    Unsupported format: {ext}    ")
-        return []
-
     if ext == '.pdf':
-        images = convert_from_path(filepath, dpi=300, poppler_path=POPPLER_PATH)
+        images = convert_from_path(filepath, dpi=300, poppler_path=poppler_path)
         return images
     else:
         image = Image.open(filepath)
