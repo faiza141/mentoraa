@@ -1,0 +1,14 @@
+# Core image processing
+Pillow>=9.0.0
+numpy>=1.23.0
+opencv-python>=4.7.0
+ 
+# OCR engines
+pytesseract>=0.3.10
+easyocr>=1.7.0
+ 
+# PDF support
+pdf2image>=1.16.0
+ 
+# Data handling
+pandas>=1.5.0
